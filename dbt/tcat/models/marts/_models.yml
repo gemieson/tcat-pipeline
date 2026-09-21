@@ -1,0 +1,22 @@
+version: 2
+
+models:
+  - name: fct_stop_arrivals
+    description: One row per scheduled trip at a watched stop, past trips only, from the analysis start date.
+    columns:
+      - name: service_date
+        tests: [not_null]
+      - name: stop_id
+        tests: [not_null]
+      - name: route_id
+        tests: [not_null]
+      - name: scheduled_arrival_at
+        tests: [not_null]
+
+  - name: mart_route_hourly_delay
+    description: Delay and on-time rate by route and hour of day (Eastern).
+    columns:
+      - name: route_id
+        tests: [not_null]
+      - name: hour_eastern
+        tests: [not_null]

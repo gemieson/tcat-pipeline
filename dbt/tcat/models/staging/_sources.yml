@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: tcat_raw
+    description: External tables over the raw Kafka output in GCS (see sql/01_external_tables.sql).
+    database: tcat-pipeline
+    schema: tcat_raw
+    tables:
+      - name: ext_vehicle_positions
+        description: One row per bus per 30s poll. Envelope columns + untouched TCAT payload (JSON).
+      - name: ext_stop_departures
+        description: One row per predicted trip per stop per 60s poll. Envelope columns + untouched payload (JSON).
