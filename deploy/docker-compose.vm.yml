@@ -1,0 +1,20 @@
+# Redpanda sized for an e2-micro (1 GB RAM). No console -- it costs memory.
+# Port bound to localhost only: the VM has a public IP and Kafka has no auth.
+services:
+  redpanda:
+    image: redpandadata/redpanda:latest
+    restart: unless-stopped
+    command:
+      - redpanda start
+      - --overprovisioned
+      - --smp 1
+      - --memory 512M
+      - --reserve-memory 0M
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://localhost:9092
+    ports:
+      - "127.0.0.1:9092:9092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+volumes:
+  redpanda-data:

@@ -1,0 +1,14 @@
+[Unit]
+Description=TCAT bash collector (all four endpoints -> local disk)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__APP__
+ExecStart=/bin/bash scripts/collect.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

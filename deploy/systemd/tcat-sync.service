@@ -1,0 +1,8 @@
+[Unit]
+Description=Copy bash collector output (incl. messages + dims) to GCS
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP__
+ExecStart=/bin/bash -c 'gcloud storage rsync -r data/raw gs://__BUCKET__/bash/raw && gcloud storage rsync -r data/dims gs://__BUCKET__/bash/dims'

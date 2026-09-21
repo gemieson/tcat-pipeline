@@ -1,0 +1,17 @@
+[Unit]
+Description=TCAT consumer (Kafka -> GCS)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__APP__
+Environment=GCS_BUCKET=__BUCKET__
+Environment=STRIP_DRIVER=1
+# No key file: on the VM, Google's libraries use the attached service account.
+ExecStart=__APP__/.venv/bin/python -u consumer/consume.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
