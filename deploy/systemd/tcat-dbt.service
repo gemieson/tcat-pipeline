@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly dbt build (staging -> intermediate -> marts, with tests)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP__/dbt/tcat
+# On the VM, dbt authenticates as the attached service account (oauth/ADC).
+ExecStart=__APP__/.venv-dbt/bin/dbt build
+Nice=10

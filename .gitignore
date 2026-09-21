@@ -12,3 +12,4 @@ gcp-key.json
 collect.log
 *.log
 *.tgz
+.venv-dbt/
