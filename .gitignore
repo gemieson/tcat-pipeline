@@ -10,3 +10,5 @@ dbt_packages/
 logs/
 gcp-key.json
 collect.log
+*.log
+*.tgz
