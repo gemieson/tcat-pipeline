@@ -25,8 +25,8 @@ tcat:
       threads: 2
 EOF
 
-echo "== 3/4 connection check"
-( cd dbt/tcat && "$APP/.venv-dbt/bin/dbt" debug )
+echo "== 3/4 dbt packages + connection check"
+( cd dbt/tcat && "$APP/.venv-dbt/bin/dbt" deps && "$APP/.venv-dbt/bin/dbt" debug )
 
 echo "== 4/4 systemd timer"
 for f in deploy/systemd/tcat-dbt.service deploy/systemd/tcat-dbt.timer; do
