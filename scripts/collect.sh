@@ -1,44 +1,40 @@
 #!/usr/bin/env bash
-# TCAT raw collector -- Phase 0.
+# TCAT side collector: the two things the Kafka pipeline doesn't collect.
+#   * service alerts (PublicMessages) every 5 minutes
+#   * a daily snapshot of all stops and each route's details, which is what
+#     makes change tracking (SCD2) possible later
+#
+# Vehicles and departures are NOT polled here any more. producer/produce.py
+# collects them; keeping a second copy here wrote ~33,000 files a day to the
+# VM disk, never deleted, and uploaded driver names (docs/DECISIONS.md, D3).
+#
 # Lands RAW bytes only. No parsing, no reshaping: parse downstream so you can
 # reprocess when (not if) you find a bug.
 #
-# Usage:  ./scripts/collect.sh
-# Stop:   Ctrl-C
-#
 # Layout (Hive-style so BigQuery external tables can partition-prune):
-#   data/raw/vehicles/dt=YYYY-MM-DD/vehicles_<ts>.json.gz
-#   data/raw/departures/dt=YYYY-MM-DD/stop=<id>/departures_<ts>.json.gz
 #   data/raw/messages/dt=YYYY-MM-DD/messages_<ts>.json.gz
-#   data/raw/_meta/dt=YYYY-MM-DD/meta.ndjson        <- every poll, incl. failures
-#   data/dims/dt=YYYY-MM-DD/{stops,route_<id>}.json.gz
+#   data/raw/_meta/dt=YYYY-MM-DD/meta.ndjson        <- every request, incl. failures
+#     (the producer writes producer.ndjson beside it: one request log, D11)
+#   data/dims/dt=YYYY-MM-DD/{stops,route_<id>}.json.gz  + .done once complete
 
-set -uo pipefail   # deliberately NOT -e: one bad poll must not kill the loop
+set -uo pipefail   # deliberately NOT -e: one bad request must not kill the loop
 
-BASE="https://realtimetcatbus.availtec.com/InfoPoint/rest"
+BASE="${TCAT_BASE:-https://realtimetcatbus.availtec.com/InfoPoint/rest}"
 ROOT="${ROOT:-data}"
-
-# --- what to poll ------------------------------------------------------------
-# Timepoint stops to watch for scheduled-vs-actual. Replace with your own picks
-# from GetAllStops where IsTimePoint == true. Keep it to ~15-25.
-DEPARTURE_STOPS=(100 165 172 1343 1344 1513 1541 1715 1534 339 349 374 541 549 665 3588 3579 1774 4783 2631 996)
-
-VEHICLE_EVERY=30     # seconds
-DEPARTURE_EVERY=60
-MESSAGE_EVERY=300
-DIMS_EVERY=86400
-# -----------------------------------------------------------------------------
+MESSAGE_EVERY="${MESSAGE_EVERY:-300}"       # seconds
+DIM_RETRY_EVERY="${DIM_RETRY_EVERY:-3600}"  # after a failed snapshot, wait this long
 
 now_iso()  { date -u +%Y-%m-%dT%H:%M:%SZ; }
 now_file() { date -u +%Y%m%dT%H%M%SZ; }
 today()    { date -u +%Y-%m-%d; }
 
 # fetch <url> <output-path-without-.gz> <source-label> [extra-meta-json]
-# Always writes a metadata line. Only writes a payload on HTTP 200.
+# Always writes a metadata line. Only writes a payload on HTTP 200, and writes
+# it atomically: gzip to <out>.gz.part, then rename. A kill mid-write leaves a
+# .part file that the sync never mistakes for a complete one.
 fetch() {
   local url="$1" out="$2" source="$3" extra="${4:-}"
-  local dt; dt="$(today)"
-  local meta_dir="$ROOT/raw/_meta/dt=$dt"
+  local meta_dir="$ROOT/raw/_meta/dt=$(today)"
   mkdir -p "$meta_dir" "$(dirname "$out")"
 
   local ingest_ts; ingest_ts="$(now_iso)"
@@ -52,91 +48,83 @@ fetch() {
   read -r code dur bytes <<<"$line"
 
   local ok=false
-  if [[ "$code" == "200" && "$bytes" -gt 0 ]]; then
-    gzip -c "$tmp" > "${out}.gz" && ok=true
+  if [[ "$code" == "200" && "${bytes:-0}" -gt 0 ]]; then
+    if gzip -c "$tmp" > "${out}.gz.part" && mv -f "${out}.gz.part" "${out}.gz"; then
+      ok=true
+    else
+      rm -f "${out}.gz.part"
+    fi
   fi
   rm -f "$tmp"
 
-  printf '{"ingest_ts":"%s","source":"%s","url":"%s","http_code":%s,"duration_s":%s,"bytes":%s,"stored":%s%s}\n' \
+  printf '{"ingest_ts":"%s","writer":"collector","source":"%s","url":"%s","http_code":%s,"duration_s":%s,"bytes":%s,"stored":%s%s}\n' \
     "$ingest_ts" "$source" "$url" "${code:-0}" "${dur:-0}" "${bytes:-0}" "$ok" \
     "${extra:+,$extra}" >> "$meta_dir/meta.ndjson"
 
   [[ "$ok" == true ]]
 }
 
-poll_vehicles() {
-  local dt ts
-  dt="$(today)"; ts="$(now_file)"
-  fetch "$BASE/Routes/GetVisibleRoutes" \
-        "$ROOT/raw/vehicles/dt=$dt/vehicles_$ts.json" \
-        "vehicles"
-}
-
-poll_departures() {
-  local dt ts stop
-  dt="$(today)"; ts="$(now_file)"
-  for stop in "${DEPARTURE_STOPS[@]}"; do
-    fetch "$BASE/StopDepartures/Get/$stop" \
-          "$ROOT/raw/departures/dt=$dt/stop=$stop/departures_$ts.json" \
-          "departures" "\"stop_id\":$stop"
-  done
-}
-
 poll_messages() {
-  local dt ts
-  dt="$(today)"; ts="$(now_file)"
   fetch "$BASE/PublicMessages/GetCurrentMessages" \
-        "$ROOT/raw/messages/dt=$dt/messages_$ts.json" \
+        "$ROOT/raw/messages/dt=$(today)/messages_$(now_file).json" \
         "messages"
 }
 
-# Daily dimension snapshot: this is what makes SCD2 possible. Without
-# yesterday's copy you cannot detect that RouteRecordId changed.
+# Route ids of the routes running right now. The response includes vehicles
+# (and driver names), so it is read and discarded, never stored.
+visible_route_ids() {
+  local tmp; tmp="$(mktemp)"
+  if curl -sS --max-time 20 --compressed -f -o "$tmp" "$BASE/Routes/GetVisibleRoutes" 2>/dev/null; then
+    grep -oE '"RouteId": *[0-9]+' "$tmp" | grep -oE '[0-9]+$' | sort -un
+  fi
+  rm -f "$tmp"
+}
+
+# Daily dimension snapshot. The day is marked .done only if every request
+# succeeded; otherwise it is retried after DIM_RETRY_EVERY seconds.
 snapshot_dims() {
-  local dt rid
-  dt="$(today)"
-  local dir="$ROOT/dims/dt=$dt"
+  local dir="$ROOT/dims/dt=$(today)"
   [[ -f "$dir/.done" ]] && return 0
   mkdir -p "$dir"
 
-  fetch "$BASE/Stops/GetAllStops" "$dir/stops.json" "dim_stops"
+  local ok=true rid rids
+  fetch "$BASE/Stops/GetAllStops" "$dir/stops.json" "dim_stops" || ok=false
 
-  # Route ids straight from the live routes payload -- no hardcoded list to
-  # drift out of date.
-  local latest
-  latest="$(ls -1t "$ROOT"/raw/vehicles/dt=*/vehicles_*.json.gz 2>/dev/null | head -1)"
-  if [[ -n "$latest" ]]; then
-    for rid in $(gzip -dc "$latest" | grep -o '"RouteId":[0-9]*' | cut -d: -f2 | sort -un); do
-      fetch "$BASE/RouteDetails/Get/$rid" "$dir/route_$rid.json" \
-            "dim_route" "\"route_id\":$rid"
-      sleep 0.3
-    done
+  rids="$(visible_route_ids)"
+  if [[ -z "$rids" ]]; then
+    ok=false   # no buses visible (or the call failed): try again later
   fi
-  touch "$dir/.done"
+  for rid in $rids; do
+    fetch "$BASE/RouteDetails/Get/$rid" "$dir/route_$rid.json" \
+          "dim_route" "\"route_id\":$rid" || ok=false
+    sleep 0.3
+  done
+
+  if [[ "$ok" == true ]]; then
+    touch "$dir/.done"
+    echo "$(now_iso) dims snapshot complete: stops + $(wc -w <<<"$rids" | tr -d ' ') routes"
+  else
+    echo "$(now_iso) dims snapshot incomplete, retrying in ${DIM_RETRY_EVERY}s" >&2
+    return 1
+  fi
 }
 
-echo "collecting into $ROOT/ -- Ctrl-C to stop"
-trap 'echo; echo "stopped at $(now_iso)"; exit 0' INT TERM
+echo "collecting alerts + daily dims into $ROOT/ -- Ctrl-C to stop"
+trap 'kill "${sleeper:-}" 2>/dev/null; echo "stopped at $(now_iso)"; exit 0' INT TERM
 
-start=$SECONDS
-last_dep=0; last_msg=0; last_dim=0
-
+last_dim_try=-$DIM_RETRY_EVERY
 while true; do
-  elapsed=$(( SECONDS - start ))
-
-  poll_vehicles
-
-  if (( elapsed - last_dep >= DEPARTURE_EVERY )); then
-    poll_departures & last_dep=$elapsed
+  if poll_messages; then
+    echo "$(now_iso) messages ok"
+  else
+    echo "$(now_iso) messages failed" >&2
   fi
-  if (( elapsed - last_msg >= MESSAGE_EVERY )); then
-    poll_messages; last_msg=$elapsed
+
+  if (( SECONDS - last_dim_try >= DIM_RETRY_EVERY )); then
+    snapshot_dims || last_dim_try=$SECONDS
   fi
-  snapshot_dims
 
-  # Heartbeat so you can tell it is alive without tailing files.
-  printf '\r%s  polls: %s ' "$(now_iso)" \
-    "$(ls -1 "$ROOT"/raw/vehicles/dt=*/ 2>/dev/null | wc -l | tr -d ' ')"
-
-  sleep "$VEHICLE_EVERY"
+  sleep "$MESSAGE_EVERY" &
+  sleeper=$!
+  wait "$sleeper"   # so SIGTERM is handled at once, not after the sleep
 done

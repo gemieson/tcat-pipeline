@@ -2,7 +2,7 @@
 # Port bound to localhost only: the VM has a public IP and Kafka has no auth.
 services:
   redpanda:
-    image: redpandadata/redpanda:latest
+    image: redpandadata/redpanda:v26.2.3   # pinned: what the VM runs (checked 2026-11-03)
     restart: unless-stopped
     command:
       - redpanda start

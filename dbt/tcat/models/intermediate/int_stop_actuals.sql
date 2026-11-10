@@ -7,6 +7,10 @@
 --   * Once ATA appears it never changes and stays on the board ~4 polls.
 -- Trips without ATA are kept (has_tcat_actual = false) so coverage can be
 -- measured and filled from the vehicles feed later.
+--
+-- A trip is TripId + direction: TripId is the scheduled start time (2115 =
+-- 21:15), so an inbound and an outbound trip on one route can share it
+-- (seen in live data, 2026-11-03; docs/DECISIONS.md, D13).
 
 with polls as (
     select
@@ -24,6 +28,7 @@ with polls as (
         stop_id,
         route_id,
         trip_id,
+        trip_direction,
         any_value(direction)            as direction,
         any_value(gtfs_trip_id)         as gtfs_trip_id,
         any_value(headsign)             as headsign,
@@ -45,7 +50,7 @@ with polls as (
         min(ingested_at)                as first_seen_at,
         max(ingested_at)                as last_seen_at
     from polls
-    group by service_date, stop_id, route_id, trip_id
+    group by service_date, stop_id, route_id, trip_id, trip_direction
 )
 
 select

@@ -5,10 +5,23 @@ version: 2
 #   warn  = suspicious values (odd coordinates, extreme delays) -> flag, keep going
 # In `dbt build`, an ERROR test skips every downstream model, so one bad GPS
 # point must not freeze the marts. Value checks are warnings on purpose.
+#
+# Envelope fields: the external tables use ignore_unknown_values=true, so if
+# the producer ever renamed a field, BigQuery would return NULL instead of
+# failing. These not_null tests turn that silent break into a loud one.
 
 models:
   - name: stg_vehicle_positions
     columns:
+      - name: ingested_at
+        data_tests: [not_null]
+      - name: route_id
+        data_tests: [not_null]
+      - name: producer_version
+        description: Warn only; very early rows may predate the field.
+        data_tests:
+          - not_null:
+              config: {severity: warn}
       - name: vehicle_id
         data_tests: [not_null]
       - name: vehicle_reported_at
@@ -26,6 +39,13 @@ models:
 
   - name: stg_stop_departures
     columns:
+      - name: ingested_at
+        data_tests: [not_null]
+      - name: producer_version
+        description: Warn only; very early rows may predate the field.
+        data_tests:
+          - not_null:
+              config: {severity: warn}
       - name: stop_id
         data_tests: [not_null]
       - name: scheduled_arrival_at
@@ -38,3 +58,15 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: -3600, max_value: 7200}
               config: {severity: warn}
+
+  - name: stg_request_log
+    description: One row per API call, from the producer and the side collector.
+    columns:
+      - name: requested_at
+        data_tests: [not_null]
+      - name: writer
+        data_tests:
+          - accepted_values:
+              arguments: {values: ['producer', 'collector']}
+      - name: delivered
+        description: Producer rows only. Messages the broker confirmed.

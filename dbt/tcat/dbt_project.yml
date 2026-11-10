@@ -14,7 +14,9 @@ clean-targets:
 models:
   tcat:
     staging:
-      +materialized: view
+      # tables, so raw JSON is read once per build, not by every downstream
+      # model and test (docs/DECISIONS.md, D4)
+      +materialized: table
     intermediate:
       +materialized: view
     marts:

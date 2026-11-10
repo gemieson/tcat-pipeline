@@ -1,7 +1,15 @@
--- One row per bus per poll. Rename, type, parse -- no filtering, no dedup.
+{{ config(partition_by={'field': 'dt', 'data_type': 'date'}) }}
+
+-- One row per bus per poll. Rename, type, parse, and drop exact replays
+-- (macros/replay_dedup.sql). No other filtering: repeated GPS fixes across
+-- polls are real observations, collapsed in int_vehicle_positions_deduped.
+--
+-- Stored as a table, rebuilt in full each build, so the raw JSON in GCS is
+-- read once per build instead of by every downstream model and test.
 
 with src as (
-    select * from {{ source('tcat_raw', 'ext_vehicle_positions') }}
+    {{ without_replays(source('tcat_raw', 'ext_vehicle_positions'),
+        ['ingested_at', 'producer_version', 'route_id', 'route_record_id', 'payload']) }}
 )
 
 select
@@ -24,10 +32,6 @@ select
     safe_cast(json_value(payload, '$.Latitude')      as float64)    as latitude,
     safe_cast(json_value(payload, '$.Longitude')     as float64)    as longitude,
 
-    -- /Date(1789944938000-0400)/ : the digits are already UTC milliseconds.
-    -- The offset is display metadata. Adding it is a silent 4-hour error.
-    timestamp_millis(safe_cast(regexp_extract(
-        json_value(payload, '$.LastUpdated'), r'/Date\((-?\d+)') as int64
-    ))                                                              as vehicle_reported_at
+    {{ dotnet_timestamp("json_value(payload, '$.LastUpdated')") }}  as vehicle_reported_at
 
 from src

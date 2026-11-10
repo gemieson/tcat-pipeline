@@ -1,0 +1,20 @@
+[
+  {"RouteId": 10, "RouteRecordId": 501, "ShortName": "10",
+   "Vehicles": [
+     {"VehicleId": 1701, "TripId": 1900, "LastStop": "Sage Hall", "Direction": "O",
+      "Latitude": 42.4453, "Longitude": -76.4826, "Deviation": 2,
+      "LastUpdated": "/Date(1793718000000-0500)/", "DriverName": "Jane Doe"},
+     {"VehicleId": 1702, "TripId": 1915, "LastStop": "Uris Hall", "Direction": "I",
+      "Latitude": 42.4475, "Longitude": -76.4820, "Deviation": 0,
+      "LastUpdated": "/Date(1793718010000-0500)/"},
+     {"TripId": 1999, "LastStop": "no vehicle id, so it can't be keyed"}
+   ]},
+  {"RouteId": 30, "RouteRecordId": 503, "ShortName": "30",
+   "Vehicles": [
+     {"VehicleId": 1830, "TripId": 3001, "LastStop": "Wegmans", "Direction": "O",
+      "Latitude": 42.4349, "Longitude": -76.5096, "Deviation": -1,
+      "LastUpdated": "/Date(1793718020000-0500)/"}
+   ]},
+  {"RouteId": 81, "RouteRecordId": 581, "Vehicles": null},
+  "not a route object"
+]

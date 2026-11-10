@@ -8,11 +8,15 @@
 -- How the GPS side is matched:
 --   * watched_stops (seed) maps stop_id -> stop_name, the name the GPS feed
 --     reports as LastStop.
---   * Join on service_date + route + trip + stop name. A trip runs one
---     direction, so the two Robert Purcell stops that share a name can't be
---     confused.
+--   * Join on service_date + route + trip + direction + stop name. TripId is
+--     the trip's start time, shared by an inbound and an outbound trip, so
+--     without direction a bus going the other way could be matched at a
+--     stop name served both ways (e.g. the two Robert Purcell stops). D13.
 --   * A loop route can pass the same stop twice in one trip: take the GPS
 --     arrival closest to the scheduled time, within -30..+90 min.
+--   * Only reliable GPS arrivals (previous report <= 120s earlier). A stop
+--     change seen right after a collection gap happened sometime during the
+--     gap, and using it would bias delays late.
 --
 -- Calibration: LastStop only changes once the bus has LEFT the stop, so GPS
 -- arrival times run late. Checked on Sep 18-21 data: GPS - ATA median +54s,
@@ -31,16 +35,19 @@ with board as (
         b.stop_id,
         b.route_id,
         b.trip_id,
+        b.trip_direction,
         g.arrived_at as gps_arrived_at
     from board b
     join {{ ref('int_vehicle_stop_arrivals') }} g
       on  g.service_date = b.service_date
       and g.route_id     = b.route_id
       and g.trip_id      = b.trip_id
+      and g.direction    = b.trip_direction
       and g.stop_name    = b.stop_name
+      and g.is_reliable_arrival   -- see int_vehicle_stop_arrivals: gaps can't place an arrival
     where timestamp_diff(g.arrived_at, b.scheduled_arrival_at, minute) between -30 and 90
     qualify row_number() over (
-        partition by b.service_date, b.stop_id, b.route_id, b.trip_id
+        partition by b.service_date, b.stop_id, b.route_id, b.trip_id, b.trip_direction
         order by abs(timestamp_diff(g.arrived_at, b.scheduled_arrival_at, second))
     ) = 1
 )
@@ -49,7 +56,7 @@ with board as (
     select b.*, g.gps_arrived_at
     from board b
     left join gps_candidates g
-      using (service_date, stop_id, route_id, trip_id)
+      using (service_date, stop_id, route_id, trip_id, trip_direction)
 )
 
 , calibration as (

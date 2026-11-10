@@ -1,8 +1,8 @@
 [Unit]
-Description=Run dbt build at quarter past every hour
+Description=Run dbt build daily at 06:20 (pre-Dagster scheduler; setup_dagster.sh disables it)
 
 [Timer]
-OnCalendar=*-*-* *:15:00
+OnCalendar=*-*-* 06:20:00 America/New_York
 Persistent=true
 
 [Install]

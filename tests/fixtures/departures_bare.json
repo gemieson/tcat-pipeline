@@ -1,0 +1,7 @@
+[
+  {"RouteId": 11, "RouteRecordId": 511, "Direction": "Outbound", "DirectionCode": "O",
+   "IsDone": false,
+   "Departures": [
+     {"Trip": {"TripId": 1105}, "STA": "/Date(1793718300000-0500)/", "Dev": "-00:00:30"}
+   ]}
+]

@@ -22,17 +22,14 @@ command -v docker >/dev/null || curl -fsSL https://get.docker.com | sudo sh
 echo "== 3/5 python venv"
 python3 -m venv .venv
 .venv/bin/pip install -q --upgrade pip
-.venv/bin/pip install -q requests confluent-kafka google-cloud-storage
+.venv/bin/pip install -q -r requirements.txt
 
 echo "== 4/5 redpanda + topics"
 $COMPOSE up -d
 until $COMPOSE exec -T redpanda rpk cluster health 2>/dev/null | grep -q 'Healthy:.*true'; do
   echo "   waiting for redpanda..."; sleep 5
 done
-for t in tcat.vehicle_positions.v1 tcat.stop_departures.v1; do
-  $COMPOSE exec -T redpanda rpk topic create "$t" -p 3 >/dev/null 2>&1 || true
-done
-$COMPOSE exec -T redpanda rpk topic list
+RPK="$COMPOSE exec -T redpanda rpk" bash deploy/topics.sh   # topics + retention, as code
 
 echo "== 5/5 systemd services (auto-start on boot, auto-restart on crash)"
 for f in deploy/systemd/*; do

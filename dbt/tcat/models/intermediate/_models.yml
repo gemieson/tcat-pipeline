@@ -18,6 +18,12 @@ models:
   - name: int_vehicle_stop_arrivals
     description: One row each time a bus reaches a new stop on a trip.
     columns:
+      - name: is_reliable_arrival
+        description: >
+          True when the bus's previous report is at most max_report_gap_seconds
+          (default 120) earlier, so the arrival time is known to within that gap.
+          False for a trip's first report and after collection gaps.
+        data_tests: [not_null]
       - name: stop_name
         data_tests: [not_null]
       - name: arrived_at
@@ -33,7 +39,7 @@ models:
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: [service_date, stop_id, route_id, trip_id]
+            combination_of_columns: [service_date, stop_id, route_id, trip_id, trip_direction]
     columns:
       - name: scheduled_arrival_at
         data_tests: [not_null]
@@ -52,7 +58,7 @@ models:
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: [service_date, stop_id, route_id, trip_id]
+            combination_of_columns: [service_date, stop_id, route_id, trip_id, trip_direction]
     columns:
       - name: stop_name
         description: From seeds/watched_stops. Null means the stop is missing from the seed.
@@ -74,3 +80,91 @@ models:
           - dbt_utils.accepted_range:
               arguments: {min_value: -1800, max_value: 5400}
               config: {severity: warn}
+
+unit_tests:
+  - name: arrival_after_a_reporting_gap_is_not_reliable
+    description: >
+      A stop change seen after a 10-minute gap happened sometime during the gap.
+      A trip's first report has no previous report to bound it.
+    model: int_vehicle_stop_arrivals
+    given:
+      - input: ref('int_vehicle_positions_deduped')
+        rows:
+          - {dt: '2026-11-03', vehicle_id: 1, trip_id: 1900, route_id: 10, last_stop_name: 'Sage Hall', vehicle_reported_at: '2026-11-03 15:00:00'}
+          - {dt: '2026-11-03', vehicle_id: 1, trip_id: 1900, route_id: 10, last_stop_name: 'Sage Hall', vehicle_reported_at: '2026-11-03 15:00:30'}
+          - {dt: '2026-11-03', vehicle_id: 1, trip_id: 1900, route_id: 10, last_stop_name: 'Uris Hall', vehicle_reported_at: '2026-11-03 15:01:00'}
+          - {dt: '2026-11-03', vehicle_id: 1, trip_id: 1900, route_id: 10, last_stop_name: 'Uris Hall', vehicle_reported_at: '2026-11-03 15:01:30'}
+          - {dt: '2026-11-03', vehicle_id: 1, trip_id: 1900, route_id: 10, last_stop_name: 'Baker Flagpole', vehicle_reported_at: '2026-11-03 15:12:00'}
+    expect:
+      rows:
+        - {stop_name: 'Sage Hall',      arrived_at: '2026-11-03 15:00:00', seconds_since_prev_report: null, is_reliable_arrival: false}
+        - {stop_name: 'Uris Hall',      arrived_at: '2026-11-03 15:01:00', seconds_since_prev_report: 30,   is_reliable_arrival: true}
+        - {stop_name: 'Baker Flagpole', arrived_at: '2026-11-03 15:12:00', seconds_since_prev_report: 630,  is_reliable_arrival: false}
+
+  - name: service_day_starts_at_3am_eastern_across_dst
+    description: >
+      Daylight saving ends 2026-11-01 at 2am EDT, so 01:30 happens twice.
+      Everything before 3am local belongs to the previous service day.
+    model: int_vehicle_stop_arrivals
+    given:
+      - input: ref('int_vehicle_positions_deduped')
+        rows:
+          - {vehicle_id: 2, trip_id: 1, last_stop_name: 'Wegmans', vehicle_reported_at: '2026-11-01 05:30:00'}  # 01:30 EDT
+          - {vehicle_id: 3, trip_id: 1, last_stop_name: 'Wegmans', vehicle_reported_at: '2026-11-01 06:30:00'}  # 01:30 EST
+          - {vehicle_id: 4, trip_id: 1, last_stop_name: 'Wegmans', vehicle_reported_at: '2026-11-01 07:50:00'}  # 02:50 EST
+          - {vehicle_id: 5, trip_id: 1, last_stop_name: 'Wegmans', vehicle_reported_at: '2026-11-01 08:10:00'}  # 03:10 EST
+    expect:
+      rows:
+        - {vehicle_id: 2, service_date: '2026-10-31'}
+        - {vehicle_id: 3, service_date: '2026-10-31'}
+        - {vehicle_id: 4, service_date: '2026-10-31'}
+        - {vehicle_id: 5, service_date: '2026-11-01'}
+
+  - name: gps_fill_uses_reliable_arrivals_and_subtracts_measured_lag
+    description: >
+      Trip 1901 has both TCAT's arrival and a GPS arrival 60s later, so the
+      measured lag is 60s. Trip 1902 has GPS only: best arrival = GPS - 60s.
+      Trip 1900's only GPS arrival came after a gap, so it stays unmeasured.
+    model: int_stop_arrivals_filled
+    given:
+      - input: ref('watched_stops')
+        rows:
+          - {stop_id: 1541, stop_name: 'Uris Hall'}
+      - input: ref('int_stop_actuals')
+        rows:
+          - {service_date: '2026-11-03', stop_id: 1541, route_id: 10, trip_id: 1900, trip_direction: 'O', scheduled_arrival_at: '2026-11-03 15:00:00', actual_arrival_at: null}
+          - {service_date: '2026-11-03', stop_id: 1541, route_id: 10, trip_id: 1901, trip_direction: 'O', scheduled_arrival_at: '2026-11-03 16:00:00', actual_arrival_at: '2026-11-03 16:02:00'}
+          - {service_date: '2026-11-03', stop_id: 1541, route_id: 10, trip_id: 1902, trip_direction: 'O', scheduled_arrival_at: '2026-11-03 17:00:00', actual_arrival_at: null}
+      - input: ref('int_vehicle_stop_arrivals')
+        rows:
+          - {service_date: '2026-11-03', route_id: 10, trip_id: 1900, direction: 'O', stop_name: 'Uris Hall', arrived_at: '2026-11-03 15:05:00', is_reliable_arrival: false}
+          - {service_date: '2026-11-03', route_id: 10, trip_id: 1901, direction: 'O', stop_name: 'Uris Hall', arrived_at: '2026-11-03 16:03:00', is_reliable_arrival: true}
+          - {service_date: '2026-11-03', route_id: 10, trip_id: 1902, direction: 'O', stop_name: 'Uris Hall', arrived_at: '2026-11-03 17:04:00', is_reliable_arrival: true}
+    expect:
+      rows:
+        - {trip_id: 1900, arrival_source: null,   best_arrival_at: null,                  gps_lag_seconds: 60}
+        - {trip_id: 1901, arrival_source: 'tcat', best_arrival_at: '2026-11-03 16:02:00', gps_lag_seconds: 60}
+        - {trip_id: 1902, arrival_source: 'gps',  best_arrival_at: '2026-11-03 17:03:00', gps_lag_seconds: 60}
+
+  - name: gps_fill_matches_direction_not_just_trip_id
+    description: >
+      Live data (2026-11-03): TripId is the start time, so the 21:15 inbound and
+      outbound buses on one route share TripId 2115. At a stop name served both
+      ways, the outbound bus passes at 21:29, closer to the 21:30 schedule; the
+      inbound trip's real arrival is 21:36. Without direction in the join, the
+      fill took the wrong bus. No trip has both ATA and GPS, so lag = 0.
+    model: int_stop_arrivals_filled
+    given:
+      - input: ref('watched_stops')
+        rows:
+          - {stop_id: 1343, stop_name: 'Robert Purcell Community Center'}
+      - input: ref('int_stop_actuals')
+        rows:
+          - {service_date: '2026-11-03', stop_id: 1343, route_id: 90, trip_id: 2115, trip_direction: 'I', scheduled_arrival_at: '2026-11-04 02:30:00', actual_arrival_at: null}
+      - input: ref('int_vehicle_stop_arrivals')
+        rows:
+          - {service_date: '2026-11-03', route_id: 90, trip_id: 2115, direction: 'O', stop_name: 'Robert Purcell Community Center', arrived_at: '2026-11-04 02:29:00', is_reliable_arrival: true}
+          - {service_date: '2026-11-03', route_id: 90, trip_id: 2115, direction: 'I', stop_name: 'Robert Purcell Community Center', arrived_at: '2026-11-04 02:36:00', is_reliable_arrival: true}
+    expect:
+      rows:
+        - {trip_id: 2115, trip_direction: 'I', arrival_source: 'gps', best_arrival_at: '2026-11-04 02:36:00', gps_lag_seconds: 0}

@@ -1,0 +1,18 @@
+[
+  {"StopId": 1541, "StopRecordId": 77, "LastUpdated": "/Date(1793718000000-0500)/",
+   "RouteDirections": [
+     {"RouteId": 10, "RouteRecordId": 501, "Direction": "Outbound", "DirectionCode": "O",
+      "IsDone": false,
+      "Departures": [
+        {"Trip": {"TripId": 1900, "GtfsTripId": "t1900", "InternalSignDesc": "Commons"},
+         "STA": "/Date(1793718300000-0500)/", "ETA": "/Date(1793718360000-0500)/",
+         "SDT": "/Date(1793718300000-0500)/", "EDT": "/Date(1793718360000-0500)/",
+         "ATA": null, "Dev": "00:01:00", "StopStatusReportLabel": "Scheduled"},
+        {"Trip": {"TripId": 1930, "GtfsTripId": "t1930", "InternalSignDesc": "Commons"},
+         "STA": "/Date(1793720100000-0500)/", "ETA": "/Date(1793720100000-0500)/",
+         "Dev": "00:00:00"}
+      ]},
+     {"RouteId": 30, "RouteRecordId": 503, "Direction": "Inbound", "DirectionCode": "I",
+      "IsDone": true, "Departures": null}
+   ]}
+]

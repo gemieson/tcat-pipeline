@@ -3,11 +3,16 @@
 -- Keeping only the reports where last_stop_name changes collapses all of
 -- that into the moments that matter. Within one trip the direction is fixed,
 -- so non-unique stop names (both sides of a road) don't cause false changes.
--- Arrival time is bounded by the ~30s report interval.
 --
 -- Trip IDs repeat every day (trip 1900 = the 7pm run, daily), so a trip
 -- instance is vehicle + trip + SERVICE DAY. The service day starts at 3am
 -- Eastern, so late-night runs belong to the day they started.
+--
+-- How well is the arrival time known? Only to within the time since the
+-- bus's previous report. is_reliable_arrival is false when that gap is longer
+-- than max_report_gap_seconds (collector down, GPS dropout) or when there is
+-- no previous report (a trip's first row: the bus may have been sitting at
+-- that stop for a while). The GPS fill uses reliable arrivals only.
 
 with positions as (
     select
@@ -20,11 +25,13 @@ with positions as (
 marked as (
     select
         *,
-        lag(last_stop_name) over (
-            partition by vehicle_id, trip_id, service_date
-            order by vehicle_reported_at
-        ) as prev_stop_name
+        lag(last_stop_name)      over trip_order as prev_stop_name,
+        lag(vehicle_reported_at) over trip_order as prev_reported_at
     from positions
+    window trip_order as (
+        partition by vehicle_id, trip_id, service_date
+        order by vehicle_reported_at
+    )
 ),
 
 arrivals as (
@@ -52,6 +59,15 @@ select
         ),
         second
     )                                                       as seconds_from_prev_stop,
+
+    -- time since this bus's previous report of any kind (null for the first)
+    timestamp_diff(vehicle_reported_at, prev_reported_at, second)
+                                                            as seconds_since_prev_report,
+    coalesce(
+        timestamp_diff(vehicle_reported_at, prev_reported_at, second)
+            <= {{ var('max_report_gap_seconds', 120) }},
+        false
+    )                                                       as is_reliable_arrival,
 
     deviation,
     display_status,

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Fake rpk for tests/test_topics.py. Records every call in $FAKE_RPK_DIR/calls,
+# keeps topic names in $FAKE_RPK_DIR/topics. FAKE_RPK_FAIL=<subcommand> makes
+# that subcommand fail, FAKE_RPK_UNKNOWN=<key> makes `cluster config get <key>` fail.
+set -u
+echo "$*" >> "$FAKE_RPK_DIR/calls"
+touch "$FAKE_RPK_DIR/topics"
+case "$1 ${2:-}" in
+  "topic list")
+    [[ "${FAKE_RPK_FAIL:-}" == list ]] && { echo "unable to connect" >&2; exit 1; }
+    echo "NAME  PARTITIONS  REPLICAS"; sed 's/$/  3  1/' "$FAKE_RPK_DIR/topics" ;;
+  "topic create")
+    [[ "${FAKE_RPK_FAIL:-}" == create ]] && { echo "INVALID_CONFIG" >&2; exit 1; }
+    echo "$3" >> "$FAKE_RPK_DIR/topics" ;;
+  "topic alter-config")
+    [[ "${FAKE_RPK_FAIL:-}" == alter ]] && { echo "INVALID_CONFIG" >&2; exit 1; } ;;
+  "cluster config")
+    [[ "$3" == get && "$4" == "${FAKE_RPK_UNKNOWN:-}" ]] && { echo "unknown property" >&2; exit 1; } ;;
+esac
+exit 0

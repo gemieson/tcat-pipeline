@@ -1,0 +1,7 @@
+# Runtime dependencies of the producer and consumer (deploy/setup.sh installs these).
+# confluent-kafka and requests are the versions the tests ran with. The
+# google-cloud-storage pin was checked against its source for the upload
+# retry behavior the consumer relies on, but never run against real GCS here.
+confluent-kafka==2.16.0
+google-cloud-storage==3.17.1
+requests==2.34.2

@@ -1,8 +1,11 @@
 [Unit]
-Description=Copy bash collector output (incl. messages + dims) to GCS
+Description=Copy side-collector output and the request log to GCS
 
 [Service]
 Type=oneshot
 User=__USER__
 WorkingDirectory=__APP__
 ExecStart=/bin/bash -c 'gcloud storage rsync -r data/raw gs://__BUCKET__/bash/raw && gcloud storage rsync -r data/dims gs://__BUCKET__/bash/dims'
+# Only after a successful sync: local request-log days older than 14 are already
+# in GCS (rsync never deletes in GCS), so the VM disk doesn't grow forever.
+ExecStartPost=-/usr/bin/find data/raw/_meta -mindepth 1 -maxdepth 1 -type d -name 'dt=*' -mtime +14 -exec rm -rf {} +

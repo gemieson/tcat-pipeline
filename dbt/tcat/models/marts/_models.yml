@@ -9,20 +9,24 @@ models:
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: [service_date, stop_id, route_id, trip_id]
+            combination_of_columns: [service_date, stop_id, route_id, trip_id, trip_direction]
     columns:
       - name: service_date
         data_tests: [not_null]
       - name: stop_id
-        data_tests: [not_null]
+        description: Every fact belongs to a stop in scope (seeds/watched_stops.csv).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('watched_stops'), field: stop_id}
+              # warn: removing a stop from the seed leaves history behind on purpose
+              config: {severity: warn}
       - name: route_id
         data_tests: [not_null]
       - name: scheduled_arrival_at
         data_tests: [not_null]
       - name: hour_eastern
-        data_tests:
-          - dbt_utils.accepted_range:
-              arguments: {min_value: 0, max_value: 23}
+        description: extract(hour ...) in Eastern time, 0-23 by construction (so untested).
       - name: is_measured
         description: True when an arrival time exists from TCAT or GPS.
       - name: tcat_delay_seconds
@@ -42,6 +46,58 @@ models:
       - name: pct_on_time_tcat_only
         description: On-time rate using TCAT's record alone, the pre-GPS-fill figure.
       - name: pct_on_time
-        data_tests:
-          - dbt_utils.accepted_range:
-              arguments: {min_value: 0, max_value: 100}
+        description: On-time measured trips / measured trips, 0-100 by construction (so untested).
+
+  - name: mart_pipeline_health
+    description: >
+      One row per UTC hour per stream from the start of the producer's request
+      log: polls made vs expected, and messages delivered to Kafka vs rows that
+      reached staging. Checked by tests/assert_no_loss_kafka_to_bigquery.sql
+      (error) and tests/assert_collection_complete.sql (warn).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hour, stream]
+
+unit_tests:
+  - name: health_counts_loss_and_shows_hours_with_no_polls
+    description: >
+      Clock fixed at 18:10. 13:00 is the first, partial hour: not judged.
+      14:00: the broker confirmed 3 vehicle messages but 2 reached staging, so
+      missing = 1. 15:00 has no polls at all and still gets a row (requests 0).
+      16:00 onward is too recent to judge. A departure row staged without a
+      logged delivery counts as -1, which is not loss.
+    model: mart_pipeline_health
+    overrides:
+      vars:
+        health_now: "timestamp '2026-11-03 18:10:00+00'"
+    given:
+      - input: ref('watched_stops')
+        rows:
+          - {stop_id: 100, stop_name: 'Ithaca Commons - Seneca St'}
+      - input: ref('stg_request_log')
+        rows:
+          - {writer: 'producer', source: 'vehicles', requested_at: '2026-11-03 13:40:00', envelope_ingested_at: '2026-11-03 13:40:01', http_code: 200, delivered: 5}
+          - {writer: 'producer', source: 'vehicles', requested_at: '2026-11-03 14:00:00', envelope_ingested_at: '2026-11-03 14:00:01', http_code: 200, delivered: 3}
+          - {writer: 'collector', source: 'messages', requested_at: '2026-11-03 14:00:00', http_code: 200}
+      - input: ref('stg_vehicle_positions')
+        rows:
+          - {ingested_at: '2026-11-03 14:00:01'}
+          - {ingested_at: '2026-11-03 14:00:01'}
+      - input: ref('stg_stop_departures')
+        rows:
+          - {ingested_at: '2026-11-03 17:30:00'}
+    expect:
+      rows:
+        - {hour: '2026-11-03 13:00:00', stream: 'vehicles',   requests: 1, missing_in_bigquery: 5,  is_checkable: false}
+        - {hour: '2026-11-03 13:00:00', stream: 'departures', requests: 0, missing_in_bigquery: 0,  is_checkable: false}
+        - {hour: '2026-11-03 14:00:00', stream: 'vehicles',   requests: 1, missing_in_bigquery: 1,  is_checkable: true}
+        - {hour: '2026-11-03 14:00:00', stream: 'departures', requests: 0, missing_in_bigquery: 0,  is_checkable: true}
+        - {hour: '2026-11-03 15:00:00', stream: 'vehicles',   requests: 0, missing_in_bigquery: 0,  is_checkable: true}
+        - {hour: '2026-11-03 15:00:00', stream: 'departures', requests: 0, missing_in_bigquery: 0,  is_checkable: true}
+        - {hour: '2026-11-03 16:00:00', stream: 'vehicles',   requests: 0, missing_in_bigquery: 0,  is_checkable: false}
+        - {hour: '2026-11-03 16:00:00', stream: 'departures', requests: 0, missing_in_bigquery: 0,  is_checkable: false}
+        - {hour: '2026-11-03 17:00:00', stream: 'vehicles',   requests: 0, missing_in_bigquery: 0,  is_checkable: false}
+        - {hour: '2026-11-03 17:00:00', stream: 'departures', requests: 0, missing_in_bigquery: -1, is_checkable: false}
+        - {hour: '2026-11-03 18:00:00', stream: 'vehicles',   requests: 0, missing_in_bigquery: 0,  is_checkable: false}
+        - {hour: '2026-11-03 18:00:00', stream: 'departures', requests: 0, missing_in_bigquery: 0,  is_checkable: false}

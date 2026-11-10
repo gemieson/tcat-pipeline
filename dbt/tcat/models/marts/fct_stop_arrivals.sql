@@ -24,6 +24,7 @@ select
     route_id,
     direction,
     trip_id,
+    trip_direction,
     gtfs_trip_id,
     headsign,
 

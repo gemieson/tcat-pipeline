@@ -1,0 +1,28 @@
+name: tests
+on: [push, pull_request]
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r requirements-dev.txt
+      # The consumer tests start a mock Kafka broker in-process: no Docker needed.
+      - run: pytest -v
+
+  dbt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install "dbt-bigquery~=1.10"
+      # parse needs a profile but never connects, so a placeholder is enough
+      - name: dbt parse
+        working-directory: dbt/tcat
+        run: |
+          mkdir -p ~/.dbt
+          printf 'tcat:\n  target: ci\n  outputs:\n    ci: {type: bigquery, method: oauth, project: placeholder, dataset: ci, threads: 1}\n' > ~/.dbt/profiles.yml
+          dbt deps && dbt parse

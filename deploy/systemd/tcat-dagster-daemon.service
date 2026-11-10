@@ -7,6 +7,8 @@ Wants=network-online.target
 User=__USER__
 WorkingDirectory=__APP__
 Environment=DAGSTER_HOME=__APP__/.dagster_home
+# TCAT_ALERT_URL for failure alerts; the leading '-' means the file is optional
+EnvironmentFile=-/etc/tcat/alerts.env
 ExecStart=__APP__/.venv-dbt/bin/dagster-daemon run -f orchestration/definitions.py
 Restart=always
 RestartSec=10

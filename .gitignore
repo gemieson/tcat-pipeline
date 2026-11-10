@@ -19,3 +19,7 @@ logs/
 *.tgz
 .dagster_home/
 .DS_Store
+
+# Local test artifacts
+.pytest_cache/
+.remediation/
