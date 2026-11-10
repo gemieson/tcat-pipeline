@@ -1,0 +1,15 @@
+[Unit]
+Description=Dagster daemon for the TCAT pipeline (runs schedules)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__APP__
+Environment=DAGSTER_HOME=__APP__/.dagster_home
+ExecStart=__APP__/.venv-dbt/bin/dagster-daemon run -f orchestration/definitions.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

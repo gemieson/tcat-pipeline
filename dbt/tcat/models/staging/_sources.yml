@@ -5,6 +5,14 @@ sources:
     description: External tables over the raw Kafka output in GCS (see sql/01_external_tables.sql).
     database: tcat-pipeline
     schema: tcat_raw
+    # Freshness: is new data still arriving? Catches a dead producer/consumer.
+    # 6h error threshold allows for the overnight gap when no buses run.
+    config:
+      loaded_at_field: "timestamp(ingested_at)"
+      freshness:
+        warn_after: {count: 2, period: hour}
+        error_after: {count: 6, period: hour}
+        filter: "dt >= date_sub(current_date(), interval 1 day)"
     tables:
       - name: ext_vehicle_positions
         description: One row per bus per 30s poll. Envelope columns + untouched TCAT payload (JSON).

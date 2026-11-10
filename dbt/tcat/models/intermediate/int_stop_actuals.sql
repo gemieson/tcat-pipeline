@@ -11,7 +11,8 @@
 with polls as (
     select
         *,
-        date(scheduled_arrival_at, 'America/New_York') as service_date
+        -- same 3am cutoff as the GPS side, so the two can be joined
+        {{ service_date('scheduled_arrival_at') }} as service_date
     from {{ ref('stg_stop_departures') }}
     where trip_id is not null
       and scheduled_arrival_at is not null

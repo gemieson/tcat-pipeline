@@ -4,9 +4,16 @@
 -- that into the moments that matter. Within one trip the direction is fixed,
 -- so non-unique stop names (both sides of a road) don't cause false changes.
 -- Arrival time is bounded by the ~30s report interval.
+--
+-- Trip IDs repeat every day (trip 1900 = the 7pm run, daily), so a trip
+-- instance is vehicle + trip + SERVICE DAY. The service day starts at 3am
+-- Eastern, so late-night runs belong to the day they started.
 
 with positions as (
-    select * from {{ ref('int_vehicle_positions_deduped') }}
+    select
+        *,
+        {{ service_date('vehicle_reported_at') }} as service_date
+    from {{ ref('int_vehicle_positions_deduped') }}
     where last_stop_name is not null
 ),
 
@@ -14,7 +21,7 @@ marked as (
     select
         *,
         lag(last_stop_name) over (
-            partition by vehicle_id, trip_id
+            partition by vehicle_id, trip_id, service_date
             order by vehicle_reported_at
         ) as prev_stop_name
     from positions
@@ -27,7 +34,7 @@ arrivals as (
 
 select
     dt,
-    date(vehicle_reported_at, 'America/New_York')           as service_date,
+    service_date,
     route_id,
     trip_id,
     vehicle_id,
@@ -36,11 +43,12 @@ select
     prev_stop_name,
     vehicle_reported_at                                     as arrived_at,
 
-    -- time since the previous stop on this trip (null for the first stop)
+    -- time since the previous stop on this trip instance (null for the first stop)
     timestamp_diff(
         vehicle_reported_at,
         lag(vehicle_reported_at) over (
-            partition by vehicle_id, trip_id order by vehicle_reported_at
+            partition by vehicle_id, trip_id, service_date
+            order by vehicle_reported_at
         ),
         second
     )                                                       as seconds_from_prev_stop,

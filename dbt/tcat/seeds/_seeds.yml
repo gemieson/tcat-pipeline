@@ -1,0 +1,17 @@
+version: 2
+
+seeds:
+  - name: watched_stops
+    description: >
+      The 21 timepoint stops whose departure boards are polled. This is the
+      project's scope: every delay figure is "at these stops", not system-wide.
+      stop_name is the name the GPS feed reports as LastStop, used to match
+      GPS arrivals to departure-board trips. Keep in sync with DEPARTURE_STOPS
+      in producer/produce.py and scripts/collect.sh.
+    config:
+      column_types: {stop_id: int64, stop_name: string, latitude: float64, longitude: float64}
+    columns:
+      - name: stop_id
+        data_tests: [unique, not_null]
+      - name: stop_name
+        data_tests: [not_null]

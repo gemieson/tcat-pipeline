@@ -1,15 +1,21 @@
+# Python
 .venv/
+.venv-dbt/
 __pycache__/
 *.pyc
+
+# Secrets -- never commit
 .env
 credentials.json
 gcp-key.json
+*-key.json
+
+# Generated
 data/
 target/
 dbt_packages/
 logs/
-gcp-key.json
-collect.log
 *.log
 *.tgz
-.venv-dbt/
+.dagster_home/
+.DS_Store

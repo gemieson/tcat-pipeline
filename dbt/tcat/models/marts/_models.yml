@@ -2,21 +2,46 @@ version: 2
 
 models:
   - name: fct_stop_arrivals
-    description: One row per scheduled trip at a watched stop, past trips only, from the analysis start date.
+    description: >
+      One row per scheduled trip at one of the 21 watched stops (seeds/watched_stops.csv),
+      past trips only, from the analysis start date. Delay uses TCAT's recorded arrival,
+      else the calibrated GPS arrival (arrival_source).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [service_date, stop_id, route_id, trip_id]
     columns:
       - name: service_date
-        tests: [not_null]
+        data_tests: [not_null]
       - name: stop_id
-        tests: [not_null]
+        data_tests: [not_null]
       - name: route_id
-        tests: [not_null]
+        data_tests: [not_null]
       - name: scheduled_arrival_at
-        tests: [not_null]
+        data_tests: [not_null]
+      - name: hour_eastern
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 23}
+      - name: is_measured
+        description: True when an arrival time exists from TCAT or GPS.
+      - name: tcat_delay_seconds
+        description: Delay from TCAT's record only. Compare with delay_seconds to see the effect of the GPS fill.
 
   - name: mart_route_hourly_delay
-    description: Delay and on-time rate by route and hour of day (Eastern).
+    description: Delay and on-time rate by route and hour of day (Eastern), at the 21 watched stops only.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [route_id, hour_eastern]
     columns:
       - name: route_id
-        tests: [not_null]
+        data_tests: [not_null]
       - name: hour_eastern
-        tests: [not_null]
+        data_tests: [not_null]
+      - name: pct_on_time_tcat_only
+        description: On-time rate using TCAT's record alone, the pre-GPS-fill figure.
+      - name: pct_on_time
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 100}

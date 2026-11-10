@@ -1,0 +1,40 @@
+version: 2
+
+# Severity rule used across the project:
+#   error = structurally impossible (missing keys, duplicates) -> stop the build
+#   warn  = suspicious values (odd coordinates, extreme delays) -> flag, keep going
+# In `dbt build`, an ERROR test skips every downstream model, so one bad GPS
+# point must not freeze the marts. Value checks are warnings on purpose.
+
+models:
+  - name: stg_vehicle_positions
+    columns:
+      - name: vehicle_id
+        data_tests: [not_null]
+      - name: vehicle_reported_at
+        data_tests: [not_null]
+      - name: latitude
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 42.2, max_value: 42.7}    # Tompkins County
+              config: {severity: warn}
+      - name: longitude
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -76.8, max_value: -76.2}
+              config: {severity: warn}
+
+  - name: stg_stop_departures
+    columns:
+      - name: stop_id
+        data_tests: [not_null]
+      - name: scheduled_arrival_at
+        data_tests:
+          - not_null:
+              config: {severity: warn}
+      - name: dev_seconds
+        description: TCAT's Dev parsed to seconds. Null when unparseable.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: -3600, max_value: 7200}
+              config: {severity: warn}

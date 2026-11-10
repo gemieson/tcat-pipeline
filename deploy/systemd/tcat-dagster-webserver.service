@@ -1,0 +1,15 @@
+[Unit]
+Description=Dagster UI for the TCAT pipeline (localhost only; reach it over an SSH tunnel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__APP__
+Environment=DAGSTER_HOME=__APP__/.dagster_home
+ExecStart=__APP__/.venv-dbt/bin/dagster-webserver -h 127.0.0.1 -p 3000 -f orchestration/definitions.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
